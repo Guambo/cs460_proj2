@@ -13,8 +13,28 @@ using namespace std;
 vector<pair<float, float>> controlPoints;
 vector<pair<float, float>> clippingRectanglePoints; // should be a total of 5 (last point is a duplicate point)
 vector<pair<float, float>> clippedPolygonPoints; // Contain all output vertexes after performing SutherlandHodgmanClipping()
+vector<pair<float, float>> viewportPolygonPoints;
 pair<float,float> dummyVertex(-1,-1);
 pair<float,float> previousControlPoint (dummyVertex);
+
+float viewportMaxSizeX = 40;
+float viewportMaxSizeY = 80;
+float viewportMinX = 0;
+float viewportMinY = 0;
+
+// World Coordinates
+float xMin;
+float yMin;
+float xMax;
+float yMax;
+// Viewport Coordinates
+float uMin;
+float vMin;
+float uMax;
+float vMax;
+// Max window size
+float maxWindowSizeX = 500;
+float maxWindowSizeY = 500;
 
 int menuEntryNum = -1;
 int menuId;
@@ -22,16 +42,33 @@ int menuId;
 bool redrawLineSegments = true;
 bool redrawClippedPolygon = false;
 bool redrawClippingRectangle = false;
-bool refillClippedPolygon = false;
+bool clippedPolygonFilled = false;
 bool viewportDefined = false;
 bool drawDynamicLine = false;
 bool pressedLeftButton = false;
 bool pressedRightButton = false;
 bool lineStippleEnabled = false;
 
+void WindowToViewportMapping();
+
+void DrawViewportPolygion() {
+	if (viewportPolygonPoints.empty()) {
+		return;
+	}
+
+	glColor3f(1.0, 1.0, 1.0);
+	for (unsigned int i = 0; i < clippedPolygonPoints.size()-1; i++) {
+		glBegin(GL_LINE_LOOP);
+			glVertex2f(clippedPolygonPoints[i].first, clippedPolygonPoints[i].second);
+			glVertex2f(clippedPolygonPoints[i+1].first, clippedPolygonPoints[i+1].second);
+		glEnd();
+	}
+}
+
 // Draws the clipped polygon
 void DrawClippedPolygon() {
 	if (clippedPolygonPoints.empty()) {
+		cout << "clippedPolygonPoints.empty" << endl;
 		return;
 	}
 
@@ -104,11 +141,11 @@ void DrawRectangularClippingWindow(int lenX, int lenY, int centerX, int centerY)
 			glEnd();
 	glDisable(GL_LINE_STIPPLE);
 
-	glFlush();
+	//glFlush();
 }
 
 void Redraw() {
-	if (refillClippedPolygon) {
+	if (clippedPolygonFilled) {
 		return;
 	}
 
@@ -116,41 +153,60 @@ void Redraw() {
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 
-	glPushMatrix();
-	glLoadIdentity();
+	if (viewportDefined) {
+		glPushMatrix();
+		glLoadIdentity();
 
-	glMatrixMode(GL_PROJECTION);
-	gluOrtho2D(0.0, glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT), 0.0);	// set coordinate system to match window size
+		glMatrixMode(GL_PROJECTION);
+		gluOrtho2D(0.0, maxWindowSizeX, maxWindowSizeY, 0.0);
 
-	if (redrawLineSegments) {
-		DrawLineSegments();
-	}
-	if (redrawClippingRectangle) {
-		DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_WIDTH) * 0.5);
-	}
-	if (redrawClippedPolygon) {
-		DrawClippedPolygon();
-	}
+		DrawViewportPolygion();
 
-	glPopMatrix();
-	glLoadIdentity();
+		glPopMatrix();
+		glLoadIdentity();
+	}
+	else {
+		glPushMatrix();
+		glLoadIdentity();
+
+		glMatrixMode(GL_PROJECTION);
+		gluOrtho2D(0.0, glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT), 0.0);	// set coordinate system to match window size
+
+		if (redrawClippingRectangle) {
+			DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_HEIGHT) * 0.5);
+		}
+		if (redrawClippedPolygon) {
+			DrawClippedPolygon();
+		}
+		else if (redrawLineSegments) {
+			DrawLineSegments();
+		}
+
+		glPopMatrix();
+		glLoadIdentity();
+	}
 
 	glFlush();
 }
 
 void Redraw2() {
-	if (redrawLineSegments) {
-		DrawLineSegments();
+	if (clippedPolygonFilled) {
+		return;
 	}
+
 	if (redrawClippingRectangle) {
-		DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_WIDTH) * 0.5);
+		DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_HEIGHT) * 0.5);
 	}
 	if (redrawClippedPolygon) {
+		cout << "Redraw clipped polygon" << endl;
 		DrawClippedPolygon();
-		if (refillClippedPolygon) {
-			//DoRegionFilling();
-			;
-		}
+		// if (clippedPolygonFilled) {
+		// 	//DoRegionFilling();
+		// 	;
+		// }
+	}
+	else if (redrawLineSegments) {
+		DrawLineSegments();
 	}
 }
 
@@ -274,7 +330,7 @@ void DoPolygonClipping() {
 	glMatrixMode(GL_PROJECTION);
 	gluOrtho2D(0.0, glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT), 0.0);	// set coordinate system to match window size
 
-	DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_WIDTH) * 0.5);
+	DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_HEIGHT) * 0.5);
 	DrawClippedPolygon();
 
 	glPopMatrix();
@@ -297,7 +353,7 @@ void boundaryFill(int x, int y, float * fillColor, float * boundaryColor) {
 		glBegin(GL_POINTS);
 			glVertex2i(x, y);
 		glEnd();
-		glFlush();
+		//glFlush();
 		boundaryFill(x + 1, y, fillColor, boundaryColor);
 		boundaryFill(x - 1, y, fillColor, boundaryColor);
 		boundaryFill(x, y + 1, fillColor, boundaryColor);
@@ -307,15 +363,9 @@ void boundaryFill(int x, int y, float * fillColor, float * boundaryColor) {
 
 // Menu Option 2
 void DoRegionFilling() {
-	menuEntryNum = -1;
 	// Fill the clipped polygon using a polygon filling algorithm to fill a red color
 	// ex: boundary filling, flood-filling, scan-line
 	// Hint: use glReadPixels and store values in a buffer, then use glDrawPixels (see hint 4 in overview)
-
-	if (clippedPolygonPoints.empty()) {
-		return;
-	}
-
 	float fillColor[] = {1.0, 0.0, 0.0};
 	float boundaryColor[] = {1.0, 1.0, 1.0};
 
@@ -323,10 +373,6 @@ void DoRegionFilling() {
 	// WARNING: If polygon does not contain the center screen then the fill algorithm
 	// will not work
 	// TODO: Calculate a seedX point as the origin point for the fill algorithm based on the clippedPolygonPoints
-	float originX = glutGet(GLUT_WINDOW_WIDTH) * 0.5;
-	float originY = glutGet(GLUT_WINDOW_HEIGHT) * 0.5;
-
-	cout << originX << endl;
 
 	glPushMatrix();
 	glLoadIdentity();
@@ -334,11 +380,18 @@ void DoRegionFilling() {
 	glMatrixMode(GL_PROJECTION);
 	gluOrtho2D(0.0, glutGet(GLUT_WINDOW_WIDTH), 0.0, glutGet(GLUT_WINDOW_HEIGHT));	// set coordinate system to match window size
 
+	float originX = glutGet(GLUT_WINDOW_WIDTH) * 0.5;
+	float originY = glutGet(GLUT_WINDOW_HEIGHT) * 0.5;
+
+	cout << originX << endl;
+
 	// Call recursive function boundaryFill()
 	boundaryFill(originX, originY, fillColor, boundaryColor);
 
 	glPopMatrix();
 	glLoadIdentity();
+
+	glFlush();
 }
 
 // Menu Option 3
@@ -346,14 +399,20 @@ void DefineViewport(int lenX, int lenY, int minX, int minY) {
 	// Create a viewport that is lenX x lenY
 	// Then perform a window-to-viewport mapping on the clipped polygon (see question 4 as an example)
 
-	int maxX = minX + lenX;
-	int maxY = minY + lenY;
+	// World coordinates
+	xMin = 0;
+	yMin = 0;
+	xMax = maxWindowSizeX;
+	yMax = maxWindowSizeY;
 
-	// WindowToViewportMapping()
+	// Viewport Coordinates
+	uMin = minX;
+	vMin = minY;
+	uMax = uMin + lenX;
+	vMax = vMin + lenY;
 
-	viewportDefined = true;
-
-	;
+	// Begin mapping clippedPolygonPoints to viewport
+	WindowToViewportMapping();
 }
 
 // start - Passive functions to be called in passiveMotionFunc
@@ -363,8 +422,17 @@ void DefineViewport(int lenX, int lenY, int minX, int minY) {
 // Performed passively once we define a viewport
 void WindowToViewportMapping() {
 	// Map clipped polygon to predefined viewport
+	for (unsigned int i = 0; i < clippedPolygonPoints.size(); i++) {
+		float x = clippedPolygonPoints[i].first;
+		float y = clippedPolygonPoints[i].second;
 
-	;
+		float transformedX = (x - xMin) * ((uMax - uMin)/(xMax -xMin)) + uMin;
+		float transformedY = (y - yMin) * ((vMax - vMin)/(yMax -yMin)) + vMin;
+
+		viewportPolygonPoints.push_back({transformedX, transformedY});
+	}
+	viewportDefined = true;
+	Redraw();
 }
 
 void ResizeViewport() {
@@ -413,9 +481,12 @@ void mouseFunc(int button, int state, int x, int y) {
 
 				// RESET PROJECT 2 VARIABLES
 				clippedPolygonPoints.clear();
+				viewportPolygonPoints.clear();
+				clippingRectanglePoints.clear();
 				redrawClippedPolygon = false;
 				redrawLineSegments = true;
-				refillClippedPolygon = false;
+				clippedPolygonFilled = false;
+				viewportDefined = false;
 			}
 			previousControlPoint = make_pair<float,float>(x,y);
 			controlPoints.push_back(previousControlPoint);	// Add a vertex to control points list
@@ -439,7 +510,7 @@ void mouseFunc(int button, int state, int x, int y) {
 // Mouse movement handler
 void passiveMotionFunc(int x, int y) {
 	if (drawDynamicLine) {
-		cout << "Clearing screen passiveMotionFunc" << endl;
+		//cout << "Clearing screen passiveMotionFunc" << endl;
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 
@@ -538,17 +609,20 @@ void DoMenuSelection() {
 	switch (menuEntryNum) {
 		case 0:
 			redrawClippingRectangle = true;
+			Redraw();
 			break;
 		case 1:
 			DoPolygonClipping();
 			redrawClippedPolygon = true;
 			break;
 		case 2:
-			DoRegionFilling();
-			refillClippedPolygon = true;
+			if (!clippedPolygonFilled && !clippedPolygonPoints.empty()) {
+				DoRegionFilling();
+				clippedPolygonFilled = true;
+			}
 			break;
 		case 3:
-			DefineViewport(40, 80, 5, 5);
+			DefineViewport(viewportMaxSizeX, viewportMaxSizeY, viewportMinX, viewportMinY);
 			break;
 		default:
 			break;
@@ -559,10 +633,12 @@ void DoMenuSelection() {
 // end - menu functions
 
 void display() {
-	cout << "Redraw - display" << endl;
-	// Performing menu actions
-	DoMenuSelection();
-	Redraw();
+	if (!drawDynamicLine) {
+		cout << "Redraw - display" << endl;
+		// Performing menu actions
+		DoMenuSelection();
+		Redraw();
+	}
 }
 
 int main(int argc, char** argv) {
@@ -574,7 +650,7 @@ int main(int argc, char** argv) {
     glutCreateWindow("Project 2");
 	glutInitDisplayMode(GLUT_SINGLE|GLUT_RGB);
     glutInitWindowSize(500, 500);
-	glutReshapeWindow(500, 500);
+	glutReshapeWindow(maxWindowSizeX, maxWindowSizeY);
     glutInitWindowPosition(200,200);
 
 	// Create the menus
