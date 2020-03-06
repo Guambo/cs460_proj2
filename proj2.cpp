@@ -1,3 +1,6 @@
+// Refernces:
+// glReadPixels - https://www.khronos.org/registry/OpenGL-Refpages/gl4/html/glReadPixels.xhtml
+
 #include <GL/glut.h>
 #include <cmath>  // abs()
 #include <assert.h>
@@ -19,7 +22,7 @@ int menuId;
 bool redrawLineSegments = true;
 bool redrawClippedPolygon = false;
 bool redrawClippingRectangle = false;
-bool refillClippedPolygon = true;
+bool refillClippedPolygon = false;
 bool viewportDefined = false;
 bool drawDynamicLine = false;
 bool pressedLeftButton = false;
@@ -32,8 +35,9 @@ void DrawClippedPolygon() {
 		return;
 	}
 
+	glColor3f(1.0, 1.0, 1.0);
 	for (unsigned int i = 0; i < clippedPolygonPoints.size()-1; i++) {
-		glBegin(GL_LINES);
+		glBegin(GL_LINE_LOOP);
 			glVertex2f(clippedPolygonPoints[i].first, clippedPolygonPoints[i].second);
 			glVertex2f(clippedPolygonPoints[i+1].first, clippedPolygonPoints[i+1].second);
 		glEnd();
@@ -50,9 +54,10 @@ void DrawLineSegments() {
 			if (controlPoints.at(i).first == -1 || controlPoints.at(i+1).first == -1) {
 				continue;
 			}
+			glColor3f(1.0, 1.0, 1.0);
 			glBegin(GL_LINES);
-			glVertex2f(controlPoints.at(i).first, controlPoints.at(i).second);
-			glVertex2f(controlPoints.at(i+1).first, controlPoints.at(i+1).second);
+				glVertex2f(controlPoints.at(i).first, controlPoints.at(i).second);
+				glVertex2f(controlPoints.at(i+1).first, controlPoints.at(i+1).second);
 			glEnd();
 		}
 	}
@@ -83,6 +88,7 @@ void DrawRectangularClippingWindow(int lenX, int lenY, int centerX, int centerY)
 
 	glEnable(GL_LINE_STIPPLE);
 		glLineStipple(4, 0xAAAA); // Define line stipple type
+			glColor3f(1, 1, 1);
 			glBegin(GL_LINES);
 				glVertex2f(minX, minY);
 				glVertex2f(minX, maxY);
@@ -102,6 +108,11 @@ void DrawRectangularClippingWindow(int lenX, int lenY, int centerX, int centerY)
 }
 
 void Redraw() {
+	if (refillClippedPolygon) {
+		return;
+	}
+
+	cout << "Clearing screen Redraw" << endl;
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 
@@ -119,10 +130,6 @@ void Redraw() {
 	}
 	if (redrawClippedPolygon) {
 		DrawClippedPolygon();
-		if (refillClippedPolygon) {
-			//DoRegionFilling();
-			;
-		}
 	}
 
 	glPopMatrix();
@@ -148,8 +155,7 @@ void Redraw2() {
 }
 
 // SutherlandHodgmanClipping helper function
-pair<float, float> computeIntersection(float x1, float y1, float x2, float y2,
-	float x3, float y3, float x4, float y4) {
+pair<float, float> computeIntersection(float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4) {
 		float x = ((x1*y2 - y1*x2)*(x3 - x4) - (x1-x2)*(x3*y4 - y3*x4)) / ((x1-x2)*(y3-y4) - (y1-y2)*(x3-x4));
 		float y = ((x1*y2 - y1*x2)*(y3-y4) - (y1-y2)*(x3*y4 - y3*x4)) / ((x1-x2)*(y3-y4) - (y1-y2)*(x3 - x4));
 
@@ -258,6 +264,7 @@ void DoPolygonClipping() {
 	redrawLineSegments = false;
 	redrawClippedPolygon = true;
 
+	cout << "Clearing screen DoPolygonClipping" << endl;
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
 
@@ -276,12 +283,62 @@ void DoPolygonClipping() {
 	glFlush();
 }
 
+// This is a 4-fill boundaryFill algorithm
+// Assumptions:
+// boundaryColor and fillColor only contain 3 elements
+void boundaryFill(int x, int y, float * fillColor, float * boundaryColor) {
+	float pixelColor[3];
+	// First read the color of the pixel at (x,y)
+	// Store in pixelColor buffer
+	glReadPixels(x, y, 1.0, 1.0, GL_RGB, GL_FLOAT, pixelColor);
+	// If pixelColor does not equal the boundary color and fill color...
+	if ((pixelColor[0] != boundaryColor[0] || pixelColor[1] != boundaryColor[1] || pixelColor[2] != boundaryColor[2]) && (pixelColor[0] != fillColor[0] || pixelColor[1] != fillColor[1] || pixelColor[2] != fillColor[2])) {
+		glColor3f(fillColor[0], fillColor[1], fillColor[2]);
+		glBegin(GL_POINTS);
+			glVertex2i(x, y);
+		glEnd();
+		glFlush();
+		boundaryFill(x + 1, y, fillColor, boundaryColor);
+		boundaryFill(x - 1, y, fillColor, boundaryColor);
+		boundaryFill(x, y + 1, fillColor, boundaryColor);
+		boundaryFill(x, y - 1, fillColor, boundaryColor);
+	}
+}
+
 // Menu Option 2
 void DoRegionFilling() {
+	menuEntryNum = -1;
 	// Fill the clipped polygon using a polygon filling algorithm to fill a red color
 	// ex: boundary filling, flood-filling, scan-line
 	// Hint: use glReadPixels and store values in a buffer, then use glDrawPixels (see hint 4 in overview)
-	;
+
+	if (clippedPolygonPoints.empty()) {
+		return;
+	}
+
+	float fillColor[] = {1.0, 0.0, 0.0};
+	float boundaryColor[] = {1.0, 1.0, 1.0};
+
+	// The origin point is set to center of the screen
+	// WARNING: If polygon does not contain the center screen then the fill algorithm
+	// will not work
+	// TODO: Calculate a seedX point as the origin point for the fill algorithm based on the clippedPolygonPoints
+	float originX = glutGet(GLUT_WINDOW_WIDTH) * 0.5;
+	float originY = glutGet(GLUT_WINDOW_HEIGHT) * 0.5;
+
+	cout << originX << endl;
+
+	glPushMatrix();
+	glLoadIdentity();
+
+	glMatrixMode(GL_PROJECTION);
+	gluOrtho2D(0.0, glutGet(GLUT_WINDOW_WIDTH), 0.0, glutGet(GLUT_WINDOW_HEIGHT));	// set coordinate system to match window size
+
+	// Call recursive function boundaryFill()
+	boundaryFill(originX, originY, fillColor, boundaryColor);
+
+	glPopMatrix();
+	glLoadIdentity();
 }
 
 // Menu Option 3
@@ -299,7 +356,7 @@ void DefineViewport(int lenX, int lenY, int minX, int minY) {
 	;
 }
 
-// begin - Passive functions to be called in passiveMotionFunc
+// start - Passive functions to be called in passiveMotionFunc
 // They are performed by dragging the top right corner of the viewport or window
 // Or moving the window horizontally/vertically
 
@@ -353,9 +410,12 @@ void mouseFunc(int button, int state, int x, int y) {
 			if (pressedRightButton) {
 				pressedRightButton = false;
 				controlPoints.clear();
+
+				// RESET PROJECT 2 VARIABLES
 				clippedPolygonPoints.clear();
 				redrawClippedPolygon = false;
 				redrawLineSegments = true;
+				refillClippedPolygon = false;
 			}
 			previousControlPoint = make_pair<float,float>(x,y);
 			controlPoints.push_back(previousControlPoint);	// Add a vertex to control points list
@@ -379,6 +439,7 @@ void mouseFunc(int button, int state, int x, int y) {
 // Mouse movement handler
 void passiveMotionFunc(int x, int y) {
 	if (drawDynamicLine) {
+		cout << "Clearing screen passiveMotionFunc" << endl;
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 
@@ -391,6 +452,7 @@ void passiveMotionFunc(int x, int y) {
 		Redraw2();
 
 		// Now draw the dynamic line with mouse cursor position as the end vertex
+		glColor3f(1.0, 1.0, 1.0);
 		glBegin(GL_LINES);
 			glVertex2f(previousControlPoint.first, previousControlPoint.second);
 			glVertex2f(x, y);
@@ -448,9 +510,10 @@ void keyboardFunc(unsigned char key, int x, int y) {
 			cout << "line width reset to 1" << endl;
 			break;
 		default:
-			break;
+			return;
 	}
 
+	cout << "Redraw - keyboardFunc" << endl;
 	// Redraw previous drawings
 	Redraw();
 }
@@ -480,11 +543,11 @@ void DoMenuSelection() {
 			DoPolygonClipping();
 			redrawClippedPolygon = true;
 			break;
-		case 3:
+		case 2:
 			DoRegionFilling();
 			refillClippedPolygon = true;
 			break;
-		case 4:
+		case 3:
 			DefineViewport(40, 80, 5, 5);
 			break;
 		default:
@@ -496,6 +559,7 @@ void DoMenuSelection() {
 // end - menu functions
 
 void display() {
+	cout << "Redraw - display" << endl;
 	// Performing menu actions
 	DoMenuSelection();
 	Redraw();
@@ -507,7 +571,8 @@ int main(int argc, char** argv) {
 
 	// Initialize window
 	glutInit(&argc, argv);
-    glutCreateWindow("Hello CS460/560");
+    glutCreateWindow("Project 2");
+	glutInitDisplayMode(GLUT_SINGLE|GLUT_RGB);
     glutInitWindowSize(500, 500);
 	glutReshapeWindow(500, 500);
     glutInitWindowPosition(200,200);
