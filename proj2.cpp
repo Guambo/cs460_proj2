@@ -17,14 +17,46 @@ int menuEntryNum = -1;
 int menuId;
 
 bool redrawLineSegments = true;
-bool redrawClippingRectangle = false;
 bool redrawClippedPolygon = false;
+bool redrawClippingRectangle = false;
 bool refillClippedPolygon = true;
 bool viewportDefined = false;
 bool drawDynamicLine = false;
 bool pressedLeftButton = false;
 bool pressedRightButton = false;
 bool lineStippleEnabled = false;
+
+// Draws the clipped polygon
+void DrawClippedPolygon() {
+	if (clippedPolygonPoints.empty()) {
+		return;
+	}
+
+	for (unsigned int i = 0; i < clippedPolygonPoints.size()-1; i++) {
+		glBegin(GL_LINES);
+			glVertex2f(clippedPolygonPoints[i].first, clippedPolygonPoints[i].second);
+			glVertex2f(clippedPolygonPoints[i+1].first, clippedPolygonPoints[i+1].second);
+		glEnd();
+	}
+}
+
+// Used to redraw lines in vector of controlPoints
+void DrawLineSegments() {
+	if (controlPoints.size() > 0) {
+		// For every 2 vertexes/elements in controlPoints, draw a line
+		for (unsigned int i = 0; i < controlPoints.size()-1; i++) {
+			// If the current vertex or the next vertex in controlPoints has an x-coordinate = -1, skip it
+			// In other words, this if-statement indicates the end of a line in our 'controlPoints' vector
+			if (controlPoints.at(i).first == -1 || controlPoints.at(i+1).first == -1) {
+				continue;
+			}
+			glBegin(GL_LINES);
+			glVertex2f(controlPoints.at(i).first, controlPoints.at(i).second);
+			glVertex2f(controlPoints.at(i+1).first, controlPoints.at(i+1).second);
+			glEnd();
+		}
+	}
+}
 
 // Menu Option 0
 void DrawRectangularClippingWindow(int lenX, int lenY, int centerX, int centerY) {
@@ -69,22 +101,179 @@ void DrawRectangularClippingWindow(int lenX, int lenY, int centerX, int centerY)
 	glFlush();
 }
 
-// Menu Option 1
+void Redraw() {
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	glPushMatrix();
+	glLoadIdentity();
+
+	glMatrixMode(GL_PROJECTION);
+	gluOrtho2D(0.0, glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT), 0.0);	// set coordinate system to match window size
+
+	if (redrawLineSegments) {
+		DrawLineSegments();
+	}
+	if (redrawClippingRectangle) {
+		DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_WIDTH) * 0.5);
+	}
+	if (redrawClippedPolygon) {
+		DrawClippedPolygon();
+		if (refillClippedPolygon) {
+			//DoRegionFilling();
+			;
+		}
+	}
+
+	glPopMatrix();
+	glLoadIdentity();
+
+	glFlush();
+}
+
+void Redraw2() {
+	if (redrawLineSegments) {
+		DrawLineSegments();
+	}
+	if (redrawClippingRectangle) {
+		DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_WIDTH) * 0.5);
+	}
+	if (redrawClippedPolygon) {
+		DrawClippedPolygon();
+		if (refillClippedPolygon) {
+			//DoRegionFilling();
+			;
+		}
+	}
+}
+
+// SutherlandHodgmanClipping helper function
+pair<float, float> computeIntersection(float x1, float y1, float x2, float y2,
+	float x3, float y3, float x4, float y4) {
+		float x = ((x1*y2 - y1*x2)*(x3 - x4) - (x1-x2)*(x3*y4 - y3*x4)) / ((x1-x2)*(y3-y4) - (y1-y2)*(x3-x4));
+		float y = ((x1*y2 - y1*x2)*(y3-y4) - (y1-y2)*(x3*y4 - y3*x4)) / ((x1-x2)*(y3-y4) - (y1-y2)*(x3 - x4));
+
+		pair<float, float> intersectionPoint (x,y);
+
+		return intersectionPoint;
+}
+
+// Called in DoPolygonClipping() (Menu Option 1)
 void SutherlandHodgmanClipping() {
+	if (controlPoints.empty()) {
+		return;
+	}
+
 	// Perform the Sutherland-Hodgman algorithm
 	// For each edge in the clipping rectangle
 	for (unsigned int i = 0; i < clippingRectanglePoints.size()-1; i++) {
 		// Clip polygon on edge created from
 		// clippingRectanglePoints i to i+1
-		pair<float, float> vertex1 = clippingRectanglePoints[i];
-		pair<float, float> vertex2 = clippingRectanglePoints[i+1];
+		pair<float, float> clippingV1 = clippingRectanglePoints[i];
+		pair<float, float> clippingV2 = clippingRectanglePoints[i+1];
+
+		// Cache individual coordinates
+		float x1 = clippingV1.first;
+		float y1 = clippingV1.second;
+
+		float x2 = clippingV2.first;
+		float y2 = clippingV2.second;
+
+		float differenceX = x2 - x1;
+		float differenceY = y2 - y1;
+
+		clippedPolygonPoints.clear();
 
 		// For each control point in the polygon...
 		for (unsigned int j = 0; j < controlPoints.size(); j++) {
-			pair<float, float> currentPoint = controlPoints[i];
-			pair<float, float> previousPoint = controlPoints[(i + controlPoints.size() - 1) % controlPoints.size()];
+			int prevIndex = (j + controlPoints.size() - 1) % controlPoints.size();
+
+			pair<float, float> currentPoint = controlPoints[j];
+			pair<float, float> previousPoint = controlPoints[prevIndex];
+
+			// Cache coordinates
+			float currentX = currentPoint.first;
+			float currentY = currentPoint.second;
+
+			float previousX = previousPoint.first;
+			float previousY = previousPoint.second;
+
+			// Calculate currentPointClipped and previousPointClipped w.r.t clipping edge vertexes clippingV1 and clippingV2
+			float currentPointClipped = ((differenceX)*(currentY - y1)) - ((differenceY)*(currentX - x1));
+			float previousPointClipped = ((differenceX)*(previousY - y1)) - ((differenceY)*(previousX - x1));
+
+			// Account for three scenarios:
+			// 1. clipped points are inside the clipping region (value < 0)
+			//	  a) both clipped points
+			//	  b) only 1 clipped point
+			// 2. clipped points lie on clipping edge (value = 0)
+			//	  a) both clipped points
+			//	  b) only 1 clipped point
+			// 3. clipping points are not inside clipping region (value > 0)
+
+			if (currentPointClipped < 0 && previousPointClipped < 0) {
+				// Only currentPoint is added
+				clippedPolygonPoints.push_back({ currentX, currentY });
+			}
+			else if (currentPointClipped >= 0 && previousPointClipped < 0) {
+				// Only point of intersection with clipping edge is added
+				pair<float, float> intersectionPoint = computeIntersection(x1, y1, x2, y2, previousX, previousY, currentX, currentY);
+
+				clippedPolygonPoints.push_back(intersectionPoint);
+			}
+			else if (currentPointClipped < 0 && previousPointClipped >= 0) {
+				// Point of intersection with clipping edge is added
+				// Current point is also added
+				pair<float, float> intersectionPoint = computeIntersection(x1, y1, x2, y2, previousX, previousY, currentX, currentY);
+
+				clippedPolygonPoints.push_back(intersectionPoint);
+				clippedPolygonPoints.push_back(currentPoint);
+			}
+		}
+
+		// Copy the vertexes in clippedPolygonPoints into controlPoints
+		controlPoints.clear();
+		for (unsigned int j = 0; j < clippedPolygonPoints.size(); j++) {
+			controlPoints.push_back(clippedPolygonPoints[j]);
 		}
 	}
+	// Finally, add the first point to the end of the clippingPolygonPoints vector
+	// This is so that when it is drawn, it will connect the last vertex in the list with the first vector
+	clippedPolygonPoints.push_back(clippedPolygonPoints[0]);
+}
+
+// Menu Option 1
+void DoPolygonClipping() {
+	if (!clippedPolygonPoints.empty()) {
+		return;
+	}
+
+	SutherlandHodgmanClipping();
+
+
+	if (clippedPolygonPoints.empty()) {
+		return;
+	}
+
+	redrawLineSegments = false;
+	redrawClippedPolygon = true;
+
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	glPushMatrix();
+	glLoadIdentity();
+
+	glMatrixMode(GL_PROJECTION);
+	gluOrtho2D(0.0, glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT), 0.0);	// set coordinate system to match window size
+
+	DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_WIDTH) * 0.5);
+	DrawClippedPolygon();
+
+	glPopMatrix();
+	glLoadIdentity();
+
+	glFlush();
 }
 
 // Menu Option 2
@@ -110,7 +299,7 @@ void DefineViewport(int lenX, int lenY, int minX, int minY) {
 	;
 }
 
-// start - Passive functions to be called in passiveMotionFunc
+// begin - Passive functions to be called in passiveMotionFunc
 // They are performed by dragging the top right corner of the viewport or window
 // Or moving the window horizontally/vertically
 
@@ -153,43 +342,10 @@ void TranslateWindow() {
 
 	;
 }
-
-// Used to redraw lines in vector of controlPoints
-void DrawLineSegments() {
-	if (controlPoints.size() > 0) {
-		// For every 2 vertexes/elements in controlPoints, draw a line
-		for (unsigned int i = 0; i < controlPoints.size()-1; i++) {
-			// If the current vertex or the next vertex in controlPoints has an x-coordinate = -1, skip it
-			// In other words, this if-statement indicates the end of a line in our 'controlPoints' vector
-			if (controlPoints.at(i).first == -1 || controlPoints.at(i+1).first == -1) {
-				continue;
-			}
-			glBegin(GL_LINES);
-			glVertex2f(controlPoints.at(i).first, controlPoints.at(i).second);
-			glVertex2f(controlPoints.at(i+1).first, controlPoints.at(i+1).second);
-			glEnd();
-		}
-	}
-}
-
-void Redraw() {
-	if (redrawLineSegments) {
-		DrawLineSegments();
-	}
-	if (redrawClippingRectangle) {
-		DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_WIDTH) * 0.5);
-	}
-	if (redrawClippedPolygon) {
-		// SutherlandHodgmanClipping();
-		if (refillClippedPolygon) {
-			//DoRegionFilling();
-		}
-	}
-}
 // end - Passive functions to be called in passiveMotionFunc
 
 
-// start - dynamic line drawing
+// begin - dynamic line drawing
 // Mouse button handler
 void mouseFunc(int button, int state, int x, int y) {
 	if (button == GLUT_LEFT_BUTTON) {
@@ -197,6 +353,9 @@ void mouseFunc(int button, int state, int x, int y) {
 			if (pressedRightButton) {
 				pressedRightButton = false;
 				controlPoints.clear();
+				clippedPolygonPoints.clear();
+				redrawClippedPolygon = false;
+				redrawLineSegments = true;
 			}
 			previousControlPoint = make_pair<float,float>(x,y);
 			controlPoints.push_back(previousControlPoint);	// Add a vertex to control points list
@@ -221,7 +380,7 @@ void mouseFunc(int button, int state, int x, int y) {
 void passiveMotionFunc(int x, int y) {
 	if (drawDynamicLine) {
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    	glClear(GL_COLOR_BUFFER_BIT);
+		glClear(GL_COLOR_BUFFER_BIT);
 
 		glPushMatrix();
 		glLoadIdentity();
@@ -229,11 +388,7 @@ void passiveMotionFunc(int x, int y) {
 		glMatrixMode(GL_PROJECTION);
 		gluOrtho2D(0.0, glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT), 0.0);	// set coordinate system to match window size
 
-		// Redraw previous drawings
-		Redraw();
-
-		// if (drawCircle)
-		// 	MidpointCircleAlgorithm(glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_HEIGHT) * 0.5, 100);
+		Redraw2();
 
 		// Now draw the dynamic line with mouse cursor position as the end vertex
 		glBegin(GL_LINES);
@@ -251,15 +406,6 @@ void passiveMotionFunc(int x, int y) {
 
 // keyboard shortcuts
 void keyboardFunc(unsigned char key, int x, int y) {
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT);
-
-	glPushMatrix();
-	glLoadIdentity();
-
-	glMatrixMode(GL_PROJECTION);
-	gluOrtho2D(0.0, glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT), 0.0);	// set coordinate system to match window size
-
 	// 'key' values based on ASCII values
 	switch (key) {
 		case 's':
@@ -307,14 +453,9 @@ void keyboardFunc(unsigned char key, int x, int y) {
 
 	// Redraw previous drawings
 	Redraw();
-
-	glPopMatrix();
-	glLoadIdentity();
-
-	glFlush(); // render when button pressed;
 }
 
-// start - menu functions
+// begin - menu functions
 // Grabs the value of the menu and sets global variable menuEntryNum to menu 'num'
 void menu(int num) {
 	menuEntryNum = num;
@@ -333,11 +474,10 @@ void createMenu(void) {
 void DoMenuSelection() {
 	switch (menuEntryNum) {
 		case 0:
-			DrawRectangularClippingWindow(200, 200, glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_WIDTH) * 0.5);
 			redrawClippingRectangle = true;
 			break;
 		case 1:
-			SutherlandHodgmanClipping();
+			DoPolygonClipping();
 			redrawClippedPolygon = true;
 			break;
 		case 3:
@@ -350,33 +490,15 @@ void DoMenuSelection() {
 		default:
 			break;
 	}
+	// Reset after done using menu
+	menuEntryNum = -1;
 }
 // end - menu functions
 
 void display() {
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-	// start - changing window coordinate system
-	glPushMatrix();
-	glLoadIdentity();
-
-	glMatrixMode(GL_PROJECTION);
-	gluOrtho2D(0.0, glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT), 0.0);	// set coordinate system to match window size
-
-	Redraw();
-
 	// Performing menu actions
 	DoMenuSelection();
-
-	// if (drawCircle)
-	// 	MidpointCircleAlgorithm(glutGet(GLUT_WINDOW_WIDTH) * 0.5, glutGet(GLUT_WINDOW_HEIGHT) * 0.5, 100);
-
-	glPopMatrix();
-	glLoadIdentity();
-	// end - returning to previous window coordinate system
-
-	glFlush();	// Render now
+	Redraw();
 }
 
 int main(int argc, char** argv) {
